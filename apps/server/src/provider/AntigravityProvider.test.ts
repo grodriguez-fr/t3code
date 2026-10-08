@@ -121,7 +121,7 @@ const makeHarness = Effect.fn("makeAntigravityProviderHarness")(function* (
     readonly enabled?: boolean;
     readonly safe?: boolean;
     readonly usageLimits?: Effect.Effect<ServerProviderUsageLimits>;
-    readonly usageLimitsCredentialFingerprint?: Effect.Effect<string | undefined>;
+    readonly usageLimitsCredentialFingerprint?: Effect.Effect<string | undefined, unknown>;
   } = {},
 ) {
   const initialProbe = yield* Deferred.make<EffectAcpSchema.InitializeResponse, ProbeError>();
@@ -713,7 +713,7 @@ describe("Antigravity quota lifecycle", () => {
         yield* TestClock.adjust("0 seconds");
         expect(yield* Ref.get(reads)).toBe(1);
       }),
-    ).pipe(Effect.provide(testLayer)),
+    ).pipe(Effect.provide(layerTest)),
   );
 
   it.effect("publishes models immediately, then publishes quota after sign-in", () =>
@@ -745,7 +745,7 @@ describe("Antigravity quota lifecycle", () => {
         const update = yield* published;
         expect(Array.from(update)[0]?.usageLimits).toEqual(testLimits);
       }),
-    ).pipe(Effect.provide(testLayer)),
+    ).pipe(Effect.provide(layerTest)),
   );
 
   it.effect(
@@ -782,7 +782,7 @@ describe("Antigravity quota lifecycle", () => {
           expect(snapshot.auth.status).toBe("unauthenticated");
           expect(snapshot.usageLimits?.windows).toEqual([]);
         }),
-      ).pipe(Effect.provide(testLayer)),
+      ).pipe(Effect.provide(layerTest)),
   );
 
   it.effect.each(["session", "health"] as const)(
@@ -845,7 +845,62 @@ describe("Antigravity quota lifecycle", () => {
           yield* Deferred.succeed(release, failed);
           expect(Array.from(yield* published)[0]?.usageLimits).toEqual(failed);
         }),
-      ).pipe(Effect.provide(testLayer)),
+      ).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("keeps the published quota when the account identity cannot be read", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const accountA = { ...testLimits, credentialFingerprint: "account-a" };
+        const identity = yield* Ref.make<Effect.Effect<string | undefined, string>>(
+          Effect.succeed("account-a"),
+        );
+        const read = yield* Ref.make<Effect.Effect<ServerProviderUsageLimits>>(
+          Effect.succeed(accountA),
+        );
+        const reads = yield* Ref.make(0);
+        const harness = yield* makeHarness({
+          usageLimits: Ref.update(reads, (count) => count + 1).pipe(
+            Effect.andThen(Ref.get(read)),
+            Effect.flatten,
+          ),
+          usageLimitsCredentialFingerprint: Ref.get(identity).pipe(Effect.flatten),
+        });
+        const published = yield* Stream.toPull(
+          harness.provider.snapshot.streamChanges.pipe(
+            Stream.filter((snapshot) => snapshot.usageLimits?.windows.length === 1),
+          ),
+        );
+        yield* harness.initialize;
+        yield* published;
+
+        const lookedUp = yield* Deferred.make<void>();
+        yield* Ref.set(
+          identity,
+          Deferred.succeed(lookedUp, undefined).pipe(
+            Effect.andThen(Effect.fail("token file unreadable")),
+          ),
+        );
+        yield* harness.provider.snapshot.refresh;
+        yield* Deferred.await(lookedUp);
+
+        // Quota reads are serialized, so this read observes the state after the failed lookup.
+        const observed = yield* Deferred.make<ServerProviderUsageLimits | undefined>();
+        yield* Ref.set(identity, Effect.succeed("account-a"));
+        yield* Ref.set(
+          read,
+          harness.provider.snapshot.getSnapshot.pipe(
+            Effect.tap((snapshot) => Deferred.succeed(observed, snapshot.usageLimits)),
+            Effect.as(accountA),
+          ),
+        );
+        yield* TestClock.adjust("30 seconds");
+        yield* harness.provider.snapshot.refresh;
+        expect(yield* Deferred.await(observed)).toEqual(accountA);
+        // Clearing would also reset the throttle and force an extra read.
+        expect(yield* Ref.get(reads)).toBe(2);
+      }),
+    ).pipe(Effect.provide(layerTest)),
   );
 
   it.effect("retains the last successful quota when a later read fails", () =>
@@ -883,6 +938,6 @@ describe("Antigravity quota lifecycle", () => {
         const snapshot = yield* harness.provider.snapshot.getSnapshot;
         expect(snapshot.usageLimits).toEqual({ ...testLimits, credentialFingerprint: "account-a" });
       }),
-    ).pipe(Effect.provide(testLayer)),
+    ).pipe(Effect.provide(layerTest)),
   );
 });

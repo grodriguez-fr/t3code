@@ -3,7 +3,7 @@ import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -104,18 +104,23 @@ export const makeAntigravityUsageLimits = Effect.fn("makeAntigravityUsageLimits"
         (typeof file.token === "string" ? file.token : file.token?.access_token)?.trim() ||
         file.access_token?.trim();
       return identity
-        ? Encoding.encodeHex(yield* crypto.digest("SHA-256", new TextEncoder().encode(identity)))
+        ? Hex.encode(yield* crypto.digest("SHA-256", new TextEncoder().encode(identity)))
         : undefined;
     });
     // Account identity must be available even when the quota backend is down.
+    // Succeeds with undefined when signed out; fails when the identity is unknown
+    // (unreadable or half-written file) so callers keep the published quota.
     const credentialFingerprint = Effect.gen(function* () {
       if (!input.enabled || input.authMethod !== "oauth-personal") return undefined;
-      const source = yield* fs.readFileString(input.tokenPath);
+      const source = yield* fs.readFileString(input.tokenPath).pipe(
+        Effect.catchTags({
+          PlatformError: (error) =>
+            error.reason._tag === "NotFound" ? Effect.succeed("") : Effect.fail(error),
+        }),
+      );
+      if (!source.trim()) return undefined;
       return yield* fingerprint(yield* decodeTokenFile(source));
-    }).pipe(
-      Effect.timeout("2 seconds"),
-      Effect.orElseSucceed(() => undefined),
-    );
+    }).pipe(Effect.timeout("2 seconds"));
     const read = Effect.gen(function* () {
       const checkedAt = DateTime.formatIso(yield* DateTime.now);
       if (!input.enabled || input.authMethod !== "oauth-personal") {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { NodeServices } from "@effect/platform-node";
 import type { AntigravityAuthMethod } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
@@ -140,7 +141,7 @@ describe("Antigravity subscription limits", () => {
   );
 
   it.effect(
-    "reads account identity locally and detects replaced, missing, or invalid credentials",
+    "reads account identity locally and detects replaced, missing, or unreadable credentials",
     () =>
       Effect.gen(function* () {
         const fixture = yield* makeFixture({ contents: encodeJson(credentials) });
@@ -151,8 +152,9 @@ describe("Antigravity subscription limits", () => {
           encodeJson({ ...credentials, refresh_token: "account-b" }),
         );
         expect(yield* fixture.credentialFingerprint).not.toBe(first);
+        // A half-written file is an unknown identity, not a sign-out.
         yield* fixture.fs.writeFileString(fixture.tokenPath, "invalid json");
-        expect(yield* fixture.credentialFingerprint).toBeUndefined();
+        expect(Exit.isFailure(yield* Effect.exit(fixture.credentialFingerprint))).toBe(true);
         yield* fixture.fs.remove(fixture.tokenPath);
         expect(yield* fixture.credentialFingerprint).toBeUndefined();
       }).pipe(Effect.provide(NodeServices.layer)),

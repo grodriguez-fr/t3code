@@ -129,7 +129,8 @@ interface AntigravityProviderOptions {
   >;
   readonly supportsTextGeneration: Effect.Effect<boolean>;
   readonly usageLimits?: Effect.Effect<ServerProviderUsageLimits>;
-  readonly usageLimitsCredentialFingerprint?: Effect.Effect<string | undefined>;
+  /** Fails when the account identity cannot be determined right now. */
+  readonly usageLimitsCredentialFingerprint?: Effect.Effect<string | undefined, unknown>;
   readonly maintenanceCapabilities?: ProviderMaintenanceCapabilities;
   /** Auth type and label published once a session authenticates. */
   readonly auth?: { readonly type: string; readonly label: string };
@@ -183,7 +184,10 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
   const clearChangedAccountLimits = Effect.fn("AntigravityProvider.clearChangedAccountLimits")(
     function* (revision: number) {
       if (!options.usageLimitsCredentialFingerprint) return;
-      const fingerprint = yield* options.usageLimitsCredentialFingerprint;
+      const lookup = yield* Effect.option(options.usageLimitsCredentialFingerprint);
+      // An unknown identity is not an account change; keep the published quota.
+      if (Option.isNone(lookup)) return;
+      const fingerprint = lookup.value;
       const cleared = yield* SubscriptionRef.modify(metadata, (state) => {
         const limits = state.draft.usageLimits;
         if (
@@ -221,7 +225,10 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
         if (
           options.usageLimitsCredentialFingerprint &&
           limits.credentialFingerprint !== undefined &&
-          (yield* options.usageLimitsCredentialFingerprint) !== limits.credentialFingerprint
+          Option.exists(
+            yield* Effect.option(options.usageLimitsCredentialFingerprint),
+            (current) => current !== limits.credentialFingerprint,
+          )
         ) {
           yield* clearChangedAccountLimits(revision);
           return;
