@@ -7,6 +7,7 @@ import {
   ProviderSetupError,
   type ServerProviderUsageLimits,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -878,7 +879,7 @@ describe("Antigravity quota lifecycle", () => {
         yield* Ref.set(
           identity,
           Deferred.succeed(lookedUp, undefined).pipe(
-            Effect.andThen(Effect.fail(new Error("token file unreadable"))),
+            Effect.andThen(Effect.fail(new Cause.TimeoutError())),
           ),
         );
         yield* harness.provider.snapshot.refresh;
