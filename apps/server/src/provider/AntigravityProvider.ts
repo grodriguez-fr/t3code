@@ -130,7 +130,7 @@ interface AntigravityProviderOptions {
   readonly supportsTextGeneration: Effect.Effect<boolean>;
   readonly usageLimits?: Effect.Effect<ServerProviderUsageLimits>;
   /** Fails when the account identity cannot be determined right now. */
-  readonly usageLimitsCredentialFingerprint?: Effect.Effect<string | undefined, unknown>;
+  readonly usageLimitsCredentialFingerprint?: Effect.Effect<string | undefined, Error>;
   readonly maintenanceCapabilities?: ProviderMaintenanceCapabilities;
   /** Auth type and label published once a session authenticates. */
   readonly auth?: { readonly type: string; readonly label: string };

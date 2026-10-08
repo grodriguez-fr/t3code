@@ -121,7 +121,7 @@ const makeHarness = Effect.fn("makeAntigravityProviderHarness")(function* (
     readonly enabled?: boolean;
     readonly safe?: boolean;
     readonly usageLimits?: Effect.Effect<ServerProviderUsageLimits>;
-    readonly usageLimitsCredentialFingerprint?: Effect.Effect<string | undefined, unknown>;
+    readonly usageLimitsCredentialFingerprint?: Effect.Effect<string | undefined, Error>;
   } = {},
 ) {
   const initialProbe = yield* Deferred.make<EffectAcpSchema.InitializeResponse, ProbeError>();
@@ -852,7 +852,7 @@ describe("Antigravity quota lifecycle", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const accountA = { ...testLimits, credentialFingerprint: "account-a" };
-        const identity = yield* Ref.make<Effect.Effect<string | undefined, string>>(
+        const identity = yield* Ref.make<Effect.Effect<string | undefined, Error>>(
           Effect.succeed("account-a"),
         );
         const read = yield* Ref.make<Effect.Effect<ServerProviderUsageLimits>>(
@@ -878,7 +878,7 @@ describe("Antigravity quota lifecycle", () => {
         yield* Ref.set(
           identity,
           Deferred.succeed(lookedUp, undefined).pipe(
-            Effect.andThen(Effect.fail("token file unreadable")),
+            Effect.andThen(Effect.fail(new Error("token file unreadable"))),
           ),
         );
         yield* harness.provider.snapshot.refresh;
